@@ -3961,6 +3961,31 @@
       margin: 0
     }
 
+    .save-box {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      word-break: break-all;
+      resize: vertical
+    }
+
+    .save-sum {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      font-size: 13px;
+      line-height: 1.7;
+      margin: 8px 0
+    }
+
+    .save-ok {
+      color: var(--gold);
+      font-size: 13px;
+      margin: 6px 0;
+      font-weight: 700
+    }
+
     /* プレイヤー欄の大きさを揃える */
     .players {
       grid-template-columns: repeat(var(--np, 4), minmax(0, 1fr));
@@ -6815,7 +6840,7 @@
     function updateBgm() {
       let k = null;
       if (S.screen === 'title' || S.screen === 'name') k = 'title';
-      else if (['menu', 'setup', 'bracket', 'lobby', 'run'].includes(S.screen)) k = 'menu';
+      else if (['menu', 'setup', 'bracket', 'lobby', 'run', 'save'].includes(S.screen)) k = 'menu';
       else if (G) {
         if (G.over) { const me = myP(); const al = G.over.alive.map(id => P(id)); k = (me ? (G.mode === 'team' ? al.some(p => p.team === me.team) : al.includes(me)) : true) ? 'win' : 'lose' }
         else k = G.round >= SUDDEN ? 'final' : 'battle';
@@ -7611,15 +7636,19 @@
         el.innerHTML = `<div class="menu-head"><h2>名前を決める</h2><button class="ghost snd-btn" data-act="sound">${sndLabel()}</button></div>
       <p class="lead">対戦中に表示される名前です（8文字まで）。</p>
       <input class="txt name-big" id="nameIn" maxlength="8" value="${esc(S.name)}" placeholder="例：へいほー" autocomplete="nickname" enterkeyhint="done">
-      <div class="actions" style="margin-top:14px"><button class="btn gold" id="nameOk" data-act="name-ok" ${S.name.trim() ? '' : 'disabled'}>決定</button><button class="ghost" data-act="to-title">← タイトルへ</button></div>`;
+      <div class="actions" style="margin-top:14px"><button class="btn gold" id="nameOk" data-act="name-ok" ${S.name.trim() ? '' : 'disabled'}>決定</button><button class="ghost" data-act="to-save">セーブコード読み込み</button><button class="ghost" data-act="to-title">← タイトルへ</button></div>`;
         return;
       }
       const err = S.err ? `<p class="err">${esc(S.err)}</p>` : '';
+      if (S.screen === 'save') {
+        el.innerHTML = saveHTML() + (S.saveMsg ? `<p class="save-ok">${esc(S.saveMsg)}</p>` : '') + err;
+        return;
+      }
       if (S.screen === 'menu') {
         const nm = esc(S.name.trim() || 'あなた');
         const card = (k, art, t, d, extra = '') => `<button class="mode-card" data-act="pick-mode" data-k="${k}"><span class="mc-art ${art}"></span><span class="mc-txt"><b>${t}</b><small>${d}</small>${extra}</span></button>`;
         el.innerHTML = `<div class="menu-head"><h2>モード選択</h2><div class="title-row"><button class="ghost snd-btn" data-act="sound">${sndLabel()}</button><button class="ghost" data-act="to-title">← タイトルへ</button></div></div>
-      <p class="lead">プレイヤー名：<b>${nm}</b>　<button class="ghost" data-act="to-name" style="padding:3px 10px;min-height:0">変更</button></p>
+      <p class="lead">プレイヤー名：<b>${nm}</b>　<button class="ghost" data-act="to-name" style="padding:3px 10px;min-height:0">変更</button> <button class="ghost" data-act="to-save" style="padding:3px 10px;min-height:0">セーブコード</button></p>
       <div class="modes">${card('cpu', 'mc-colosseum', 'コロシアム', '人数と強さを決めて自由に対戦')}${card('tour', 'mc-tour', 'トーナメント', '8人の勝ち抜き戦。3連勝で優勝', S.master ? '<em class="mc-badge">最強CPU 解放済み</em>' : '')}${card('run', 'mc-run', '天界巡礼', 'CPUと連戦し、カードと加護で強くなる', S.run && S.run.phase !== 'over' ? '<em class="mc-badge">続きあり</em>' : runMeta().best ? `<em class="mc-badge dim">自己ベスト ${runMeta().best}</em>` : '')}${card('online', 'mc-online', 'オンライン対戦', '部屋コードで友だちと遊ぶ')}</div>${err}`;
         return;
       }
@@ -7685,9 +7714,111 @@
       el.innerHTML = h + err;
     }
 
+    /* ================= セーブコード ================= */
+    function encodeSaveCode() {
+      const rm = runMeta();
+      const data = {
+        v: 1,
+        n: S.name || '',
+        m: S.master ? 1 : 0,
+        d: S.dancer ? 1 : 0,
+        a: S.alch ? 1 : 0,
+        rm: [rm.best || 0, rm.clears || 0, rm.trial || 0, rm.runs || 0]
+      };
+      if (S.run && S.run.phase !== 'over') {
+        const R = { ...S.run, inBattle: false };
+        delete R.runShown;
+        data.r = R;
+      }
+      const bytes = new TextEncoder().encode(JSON.stringify(data));
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      const b64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      let h = 2166136261;
+      for (let i = 0; i < b64.length; i++) { h ^= b64.charCodeAt(i); h = Math.imul(h, 16777619) }
+      const sum = (h >>> 0).toString(16).padStart(8, '0').slice(0, 4);
+      return `HA1-${b64}-${sum}`;
+    }
+    function decodeSaveCode(raw) {
+      const s = (raw || '').replace(/\s+/g, '');
+      const m = /^HA1-([A-Za-z0-9_-]+)-([0-9a-fA-F]{4})$/.exec(s);
+      if (!m) throw new Error('セーブコードの形式が正しくありません。');
+      const [, b64, sum] = m;
+      let h = 2166136261;
+      for (let i = 0; i < b64.length; i++) { h ^= b64.charCodeAt(i); h = Math.imul(h, 16777619) }
+      if ((h >>> 0).toString(16).padStart(8, '0').slice(0, 4) !== sum.toLowerCase()) throw new Error('セーブコードが破損しているか、コピー漏れがあります。');
+      const pad = b64.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64.length + 3) % 4);
+      const bin = atob(pad);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const data = JSON.parse(new TextDecoder().decode(bytes));
+      if (!data || data.v !== 1) throw new Error('対応していないバージョンのセーブコードです。');
+      return data;
+    }
+    function applySaveCode(raw) {
+      const data = decodeSaveCode(raw);
+      const nm = typeof data.n === 'string' ? data.n.trim().slice(0, 8) : '';
+      if (nm) S.name = nm;
+      S.master = !!data.m;
+      S.dancer = !!data.d;
+      S.alch = !!data.a;
+      try {
+        if (S.name) localStorage.setItem('ha-name', S.name); else localStorage.removeItem('ha-name');
+        if (S.master) localStorage.setItem('ha-master', '1'); else localStorage.removeItem('ha-master');
+        if (S.dancer) localStorage.setItem('ha-dancer', '1'); else localStorage.removeItem('ha-dancer');
+        if (S.alch) localStorage.setItem('ha-alch', '1'); else localStorage.removeItem('ha-alch');
+      } catch (e) { }
+      const rmArr = Array.isArray(data.rm) ? data.rm : [];
+      const meta = {
+        best: Math.max(0, Math.floor(+rmArr[0] || 0)),
+        clears: Math.max(0, Math.floor(+rmArr[1] || 0)),
+        trial: Math.max(0, Math.min(TRIALS.length - 1, Math.floor(+rmArr[2] || 0))),
+        runs: Math.max(0, Math.floor(+rmArr[3] || 0))
+      };
+      try { localStorage.setItem(RUN_META, JSON.stringify(meta)) } catch (e) { }
+      if (data.r && data.r.v === 1 && data.r.phase !== 'over' && Array.isArray(data.r.floors)) {
+        data.r.inBattle = false;
+        S.run = data.r;
+      } else {
+        S.run = null;
+      }
+      runSave();
+      if (S.role !== 'random' && (!ROLES[S.role] || !isUnlocked(S.role))) S.role = 'random';
+      if (S.diff === 'master' && !S.master) S.diff = 'normal';
+      if (+S.trial > meta.trial) S.trial = '0';
+      buildRuleTables();
+    }
+    function saveHTML() {
+      const rm = runMeta();
+      const unl = [];
+      if (S.master) unl.push('最強CPU');
+      if (S.dancer) unl.push('踊り子');
+      if (S.alch) unl.push('錬金術師');
+      if (rm.trial > 0) unl.push(`試練${rm.trial}`);
+      const R = S.run && S.run.phase !== 'over' ? S.run : null;
+      const code = encodeSaveCode();
+      return `<div class="menu-head"><h2>セーブコード</h2><button class="ghost" data-act="${S.name.trim() ? 'to-menu' : 'to-name'}">← 戻る</button></div>
+      <div class="save-sum">
+        <div>プレイヤー名：<b>${esc(S.name.trim() || '未設定')}</b></div>
+        <div>解放済み要素：<b>${unl.length ? unl.join('・') : 'なし'}</b></div>
+        <div>天界巡礼：自己ベスト <b>${rm.best}</b>・踏破 <b>${rm.clears}回</b>・挑戦 <b>${rm.runs}回</b>${R ? `（中断データ：第${R.ch}章）` : ''}</div>
+      </div>
+      <div class="opt-group"><h4>セーブコードの書き出し</h4>
+        <p class="note">現在の進行状況（解放要素・天界巡礼の記録や中断データ）をコードとして書き出します。</p>
+        <textarea class="txt save-box" id="saveOut" rows="3" readonly>${esc(code)}</textarea>
+        <div class="actions" style="margin-top:6px"><button class="btn gold" data-act="save-copy">${S.copied ? 'コピーしました！' : 'コードをコピー'}</button></div>
+      </div>
+      <div class="opt-group"><h4>セーブコードの読み込み</h4>
+        <p class="note">書き出したセーブコードを貼り付けて読み込むと、データを復元します（現在のデータは上書きされます）。</p>
+        <textarea class="txt save-box" id="saveIn" rows="3" placeholder="HA1-... で始まるコードを貼り付け">${esc(S.saveIn || '')}</textarea>
+        <div class="actions" style="margin-top:6px"><button class="btn" id="saveLoadBtn" data-act="save-load" ${(S.saveIn || '').trim() ? '' : 'disabled'}>読み込む</button></div>
+      </div>`;
+    }
+
     /* ================= イベント ================= */
     document.addEventListener('click', e => {
       if (!AU.unlocked) auUnlock();
+      if (e.target.id === 'saveOut') { e.target.select(); return }
       if (e.target.closest('#log')) { $('log').classList.toggle('open'); return }
       if (S.screen === 'title' && !e.target.closest('#rulesOv')) { sfx('tap'); S.screen = S.name.trim() ? 'menu' : 'name'; renderStart(); return }
       { const bt = e.target.closest('button'); if (bt && !bt.disabled && bt.dataset.act !== 'sound') sfx('tap') }
@@ -7706,9 +7837,39 @@
         case 'rules': $('rulesOv').hidden = false; break;
         case 'rules-close': $('rulesOv').hidden = true; break;
         case 'start-cpu': startOffline(); break;
-        case 'to-menu': if (S.joining) { S.token++; S.joining = false } S.screen = 'menu'; S.err = ''; renderStart(); break;
+        case 'to-menu': if (S.joining) { S.token++; S.joining = false } S.screen = 'menu'; S.err = ''; S.saveMsg = ''; renderStart(); break;
         case 'to-title': if (S.joining) { S.token++; S.joining = false } S.screen = 'title'; renderStart(); break;
-        case 'to-name': S.screen = 'name'; renderStart(); break;
+        case 'to-name': S.screen = 'name'; S.err = ''; S.saveMsg = ''; renderStart(); break;
+        case 'to-save': S.screen = 'save'; S.err = ''; S.saveMsg = ''; S.copied = false; renderStart(); break;
+        case 'save-copy': {
+          const code = encodeSaveCode();
+          const done = () => { S.copied = true; renderStart(); setTimeout(() => { if (S.copied) { S.copied = false; if (S.screen === 'save') renderStart() } }, 2000) };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(done).catch(() => {
+              const ta = $('saveOut'); if (ta) { ta.focus(); ta.select(); try { document.execCommand('copy') } catch (err) { } }
+              done();
+            });
+          } else {
+            const ta = $('saveOut'); if (ta) { ta.focus(); ta.select(); try { document.execCommand('copy') } catch (err) { } }
+            done();
+          }
+          break;
+        }
+        case 'save-load': {
+          try {
+            applySaveCode(S.saveIn);
+            S.saveIn = '';
+            S.err = '';
+            S.saveMsg = 'セーブコードを読み込みました！';
+            sfx('classup');
+            renderStart();
+          } catch (err) {
+            S.saveMsg = '';
+            S.err = err && err.message ? err.message : 'セーブコードを読み込めませんでした。';
+            renderStart();
+          }
+          break;
+        }
         case 'special': {
           const me = myP(); if (!me || (me.sp || 0) < SP_MAX || !isMyTurn() || S.ui.waiting) break;
           if (SPECIALS[me.role].kind === 'enemy') { S.ui.sel = []; S.ui.phase = 'spTarget'; render() } else { S.ui.waiting = true; render(); submitIntent({ t: 'special' }); render() } break
@@ -7766,6 +7927,7 @@
     document.addEventListener('input', e => {
       if (e.target.id === 'nameIn') { S.name = e.target.value; try { localStorage.setItem('ha-name', S.name) } catch (err) { } const b = $('nameOk'); if (b) b.disabled = !S.name.trim() }
       if (e.target.id === 'codeIn') S.code = e.target.value;
+      if (e.target.id === 'saveIn') { S.saveIn = e.target.value; const b = $('saveLoadBtn'); if (b) b.disabled = !S.saveIn.trim() }
     });
 
     /* ================= 天界巡礼（ソロの周回モード） ================= */
